@@ -47,7 +47,7 @@ class Grid(plugins.Plugin):
     __version__ = '1.0.1'
     __license__ = 'GPL3'
     __description__ = 'This plugin signals the unit cryptographic identity and list of pwned networks and list of pwned ' \
-                      'networks to api.pwnagotchi.ai '
+                      'networks to opwngrid.xyz '
 
     def __init__(self):
         self.options = dict()
@@ -57,8 +57,9 @@ class Grid(plugins.Plugin):
         self.total_messages = 0
         self.lock = Lock()
 
-    def is_excluded(self, what):
-        for skip in self.options['exclude']:
+    def is_excluded(self, what, agent):
+        config = agent.config()
+        for skip in config['main']['whitelist']:
             skip = skip.lower()
             what = what.lower()
             if skip in what or skip.replace(':', '') in what:
@@ -85,9 +86,10 @@ class Grid(plugins.Plugin):
             agent.view().on_unread_messages(self.unread_messages, self.total_messages)
 
     def check_handshakes(self, agent):
-        logging.debug("checking pcaps")
+        logging.debug("checking pcap's")
+        config = agent.config()
 
-        pcap_files = glob.glob(os.path.join(agent.config()['bettercap']['handshakes'], "*.pcap"))
+        pcap_files = glob.glob(os.path.join(config['bettercap']['handshakes'], "*.pcap"))
         num_networks = len(pcap_files)
         reported = self.report.data_field_or('reported', default=[])
         num_reported = len(reported)
@@ -97,19 +99,19 @@ class Grid(plugins.Plugin):
             if self.options['report']:
                 logging.info("grid: %d new networks to report" % num_new)
                 logging.debug("self.options: %s" % self.options)
-                logging.debug("  exclude: %s" % self.options['exclude'])
+                logging.debug("  exclude: %s" % config['main']['whitelist'])
 
                 for pcap_file in pcap_files:
                     net_id = os.path.basename(pcap_file).replace('.pcap', '')
                     if net_id not in reported:
-                        if self.is_excluded(net_id):
+                        if self.is_excluded(net_id, agent):
                             logging.debug("skipping %s due to exclusion filter" % pcap_file)
                             self.set_reported(reported, net_id)
                             continue
 
                         essid, bssid = parse_pcap(pcap_file)
                         if bssid:
-                            if self.is_excluded(essid) or self.is_excluded(bssid):
+                            if self.is_excluded(essid, agent) or self.is_excluded(bssid, agent):
                                 logging.debug("not reporting %s due to exclusion filter" % pcap_file)
                                 self.set_reported(reported, net_id)
                             else:

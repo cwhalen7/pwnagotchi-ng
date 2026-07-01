@@ -4,7 +4,9 @@ import os
 import re
 import logging
 import asyncio
-import _thread
+#import _thread
+import threading
+import subprocess
 
 import pwnagotchi
 import pwnagotchi.utils as utils
@@ -21,17 +23,17 @@ RECOVERY_DATA_FILE = '/root/.pwnagotchi-recovery'
 
 class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
     def __init__(self, view, config, keypair):
-        Client.__init__(self, config['bettercap']['hostname'],
-                        config['bettercap']['scheme'],
-                        config['bettercap']['port'],
-                        config['bettercap']['username'],
-                        config['bettercap']['password'])
+        Client.__init__(self,
+                        "127.0.0.1" if "hostname" not in config['bettercap'] else config['bettercap']['hostname'],
+                        "http" if "scheme" not in config['bettercap'] else config['bettercap']['scheme'],
+                        8081 if "port" not in config['bettercap'] else config['bettercap']['port'],
+                        "pwnagotchi" if "username" not in config['bettercap'] else config['bettercap']['username'],
+                        "pwnagotchi" if "password" not in config['bettercap'] else config['bettercap']['password'])
         Automata.__init__(self, config, view)
         AsyncAdvertiser.__init__(self, config, view, keypair)
         AsyncTrainer.__init__(self, config)
 
         self._started_at = time.time()
-        self._filter = None if not config['main']['filter'] else re.compile(config['main']['filter'])
         self._current_channel = 0
         self._tot_aps = 0
         self._aps_on_channel = 0
@@ -164,11 +166,6 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
 
         self.wait_for(recon_time, sleeping=False)
 
-    def _filter_included(self, ap):
-        return self._filter is None or \
-               self._filter.match(ap['hostname']) is not None or \
-               self._filter.match(ap['mac']) is not None
-
     def set_access_points(self, aps):
         self._access_points = aps
         plugins.on('wifi_update', self, aps)
@@ -184,13 +181,12 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
             for ap in s['wifi']['aps']:
                 if ap['encryption'] == '' or ap['encryption'] == 'OPEN':
                     continue
-                elif ap['hostname'] not in whitelist \
-                        and ap['mac'].lower() not in whitelist \
-                        and ap['mac'][:8].lower() not in whitelist:
-                    if self._filter_included(ap):
-                        aps.append(ap)
+                elif ap['hostname'] in whitelist or ap['mac'][:13].lower() in whitelist or ap['mac'].lower() in whitelist:
+                    continue
+                else:
+                    aps.append(ap)
         except Exception as e:
-            logging.exception("Error while getting acces points (%s)", e)
+            logging.exception("Error while getting access points (%s)", e)
 
         aps.sort(key=lambda ap: ap['channel'])
         return self.set_access_points(aps)
@@ -230,8 +226,8 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
             if ap['mac'] == ap_mac:
                 for sta in ap['clients']:
                     if sta['mac'] == station_mac:
-                        return (ap, sta)
-                return (ap, {'mac': station_mac, 'vendor': ''})
+                        return ap, sta
+                return ap, {'mac': station_mac, 'vendor': ''}
         return None
 
     def _update_uptime(self, s):
@@ -260,7 +256,7 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
         txt = '%d (%d)' % (len(self._handshakes), tot)
 
         if self._last_pwnd is not None:
-            txt += ' [%s]' % self._last_pwnd[:20]
+            txt += ' [%s]' % self._last_pwnd
 
         self._view.set('shakes', txt)
 
@@ -274,6 +270,10 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
         self.set_rebooting()
         self._save_recovery_data()
         pwnagotchi.reboot()
+
+    def _restart(self, mode='AUTO'):
+        self._save_recovery_data()
+        pwnagotchi.restart(mode)
 
     def _save_recovery_data(self):
         logging.warning("writing recovery data to %s ...", RECOVERY_DATA_FILE)
@@ -305,24 +305,51 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
             if not no_exceptions:
                 raise
 
-
     def start_session_fetcher(self):
-        _thread.start_new_thread(self._fetch_stats, ())
-
+        #_thread.start_new_thread(self._fetch_stats, ())
+        threading.Thread(target=self._fetch_stats, args=(), name="Session Fetcher", daemon=True).start()
 
     def _fetch_stats(self):
         while True:
-            s = self.session()
-            self._update_uptime(s)
-            self._update_advertisement(s)
-            self._update_peers()
-            self._update_counters()
-            self._update_handshakes(0)
-            time.sleep(1)
+            try:
+                s = self.session()
+            except Exception as err:
+                logging.error("[agent:_fetch_stats] self.session: %s" % repr(err))
+
+            try:
+                self._update_uptime(s)
+            except Exception as err:
+                logging.error("[agent:_fetch_stats] self.update_uptimes: %s" % repr(err))
+
+            try:
+                self._update_advertisement(s)
+            except Exception as err:
+                logging.error("[agent:_fetch_stats] self.update_advertisements: %s" % repr(err))
+
+            try:
+                self._update_peers()
+            except Exception as err:
+                logging.error("[agent:_fetch_stats] self.update_peers: %s" % repr(err))
+            try:
+                self._update_counters()
+            except Exception as err:
+                logging.error("[agent:_fetch_stats] self.update_counters: %s" % repr(err))
+            try:
+                self._update_handshakes(0)
+            except Exception as err:
+                logging.error("[agent:_fetch_stats] self.update_handshakes: %s" % repr(err))
+
+            time.sleep(5)
 
     async def _on_event(self, msg):
         found_handshake = False
         jmsg = json.loads(msg)
+
+        # give plugins access to the events
+        try:
+            plugins.on('bcap_%s' % re.sub(r"[^a-z0-9_]+", "_", jmsg['tag'].lower()), self, jmsg)
+        except Exception as err:
+            logging.error("Processing event: %s" % err)
 
         if jmsg['tag'] == 'wifi.client.handshake':
             filename = jmsg['data']['file']
@@ -343,10 +370,7 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
                         'hostname'] != '<hidden>' else ap_mac
                     logging.warning(
                         "!!! captured new handshake on channel %d, %d dBm: %s (%s) -> %s [%s (%s)] !!!",
-                            ap['channel'],
-                            ap['rssi'],
-                            sta['mac'], sta['vendor'],
-                            ap['hostname'], ap['mac'], ap['vendor'])
+                        ap['channel'], ap['rssi'], sta['mac'], sta['vendor'], ap['hostname'], ap['mac'], ap['vendor'])
                     plugins.on('handshake', self, filename, ap, sta)
                 found_handshake = True
             self._update_handshakes(1 if found_handshake else 0)
@@ -356,17 +380,18 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
         self.run('events.clear')
 
         while True:
-            logging.debug("polling events ...")
+            logging.debug("[agent:_event_poller] polling events ...")
             try:
                 loop.create_task(self.start_websocket(self._on_event))
                 loop.run_forever()
+                logging.debug("[agent:_event_poller] loop loop loop")
             except Exception as ex:
-                logging.debug("Error while polling via websocket (%s)", ex)
+                logging.debug("[agent:_event_poller] Error while polling via websocket (%s)", ex)
 
     def start_event_polling(self):
         # start a thread and pass in the mainloop
-        _thread.start_new_thread(self._event_poller, (asyncio.get_event_loop(),))
-
+        #_thread.start_new_thread(self._event_poller, (asyncio.get_event_loop(),))
+        threading.Thread(target=self._event_poller, args=(asyncio.get_event_loop(),), name="Event Polling", daemon=True).start()
 
     def is_module_running(self, module):
         s = self.session()
@@ -400,17 +425,19 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
 
         return self._history[who] < self._config['personality']['max_interactions']
 
-    def associate(self, ap, throttle=0):
+    def associate(self, ap, throttle=-1):
         if self.is_stale():
             logging.debug("recon is stale, skipping assoc(%s)", ap['mac'])
             return
+        if throttle == -1 and "throttle_a" in self._config['personality']:
+            throttle = self._config['personality']['throttle_a']
 
         if self._config['personality']['associate'] and self._should_interact(ap['mac']):
             self._view.on_assoc(ap)
 
             try:
                 logging.info("sending association frame to %s (%s %s) on channel %d [%d clients], %d dBm...",
-                    ap['hostname'], ap['mac'], ap['vendor'], ap['channel'], len(ap['clients']), ap['rssi'])
+                             ap['hostname'], ap['mac'], ap['vendor'], ap['channel'], len(ap['clients']), ap['rssi'])
                 self.run('wifi.assoc %s' % ap['mac'])
                 self._epoch.track(assoc=True)
             except Exception as e:
@@ -421,17 +448,21 @@ class Agent(Client, Automata, AsyncAdvertiser, AsyncTrainer):
                 time.sleep(throttle)
             self._view.on_normal()
 
-    def deauth(self, ap, sta, throttle=0):
+    def deauth(self, ap, sta, throttle=-1):
         if self.is_stale():
             logging.debug("recon is stale, skipping deauth(%s)", sta['mac'])
             return
+
+        if throttle == -1 and "throttle_d" in self._config['personality']:
+            throttle = self._config['personality']['throttle_d']
 
         if self._config['personality']['deauth'] and self._should_interact(sta['mac']):
             self._view.on_deauth(sta)
 
             try:
                 logging.info("deauthing %s (%s) from %s (%s %s) on channel %d, %d dBm ...",
-                    sta['mac'], sta['vendor'], ap['hostname'], ap['mac'], ap['vendor'], ap['channel'], ap['rssi'])
+                             sta['mac'], sta['vendor'], ap['hostname'], ap['mac'], ap['vendor'], ap['channel'],
+                             ap['rssi'])
                 self.run('wifi.deauth %s' % sta['mac'])
                 self._epoch.track(deauth=True)
             except Exception as e:

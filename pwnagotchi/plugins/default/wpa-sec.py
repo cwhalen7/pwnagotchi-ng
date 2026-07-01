@@ -43,7 +43,6 @@ class WpaSec(plugins.Plugin):
             except requests.exceptions.RequestException as req_e:
                 raise req_e
 
-
     def _download_from_wpasec(self, output, timeout=30):
         """
         Downloads the results from wpasec and safes them to output
@@ -65,7 +64,6 @@ class WpaSec(plugins.Plugin):
         except OSError as os_e:
             raise os_e
 
-
     def on_loaded(self):
         """
         Gets called when the plugin gets loaded
@@ -77,9 +75,6 @@ class WpaSec(plugins.Plugin):
         if 'api_url' not in self.options or ('api_url' in self.options and not self.options['api_url']):
             logging.error("WPA_SEC: API-URL isn't set. Can't upload, no endpoint configured.")
             return
-
-        if 'whitelist' not in self.options:
-            self.options['whitelist'] = list()
 
         self.ready = True
         logging.info("WPA_SEC: plugin loaded")
@@ -103,9 +98,8 @@ class WpaSec(plugins.Plugin):
             reported = self.report.data_field_or('reported', default=list())
             handshake_dir = config['bettercap']['handshakes']
             handshake_filenames = os.listdir(handshake_dir)
-            handshake_paths = [os.path.join(handshake_dir, filename) for filename in handshake_filenames if
-                               filename.endswith('.pcap')]
-            handshake_paths = remove_whitelisted(handshake_paths, self.options['whitelist'])
+            handshake_paths = [os.path.join(handshake_dir, filename) for filename in handshake_filenames if filename.endswith('.pcap')]
+            handshake_paths = remove_whitelisted(handshake_paths, config['main']['whitelist'])
             handshake_new = set(handshake_paths) - set(reported) - set(self.skip)
 
             if handshake_new:

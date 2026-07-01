@@ -7,7 +7,6 @@ from pwnagotchi.ui.hw.base import DisplayImpl
 class OledHat(DisplayImpl):
     def __init__(self, config):
         super(OledHat, self).__init__(config, 'oledhat')
-        self._display = None
 
     def layout(self):
         fonts.setup(8, 8, 8, 10, 10, 8)
@@ -33,7 +32,7 @@ class OledHat(DisplayImpl):
 
     def initialize(self):
         logging.info("initializing oledhat display")
-        from pwnagotchi.ui.hw.libs.waveshare.oledhat.epd import EPD
+        from pwnagotchi.ui.hw.libs.waveshare.oled.oledhat.epd import EPD
         self._display = EPD()
         self._display.init()
         self._display.Clear()
@@ -42,4 +41,4 @@ class OledHat(DisplayImpl):
         self._display.display(canvas)
 
     def clear(self):
-        self._display.clear()
+        self._display.Clear()

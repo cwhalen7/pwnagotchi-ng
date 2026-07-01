@@ -40,7 +40,7 @@ class Automata(object):
         support_factor = total_encounters / bond_factor
         return support_factor >= factor
 
-    # triggered when it's a sad/bad day but you have good friends around ^_^
+    # triggered when it's a sad/bad day, but you have good friends around ^_^
     def set_grateful(self):
         self._view.on_grateful()
         plugins.on('grateful', self)
@@ -138,6 +138,6 @@ class Automata(object):
         plugins.on('epoch', self, self._epoch.epoch - 1, self._epoch.data())
 
         if self._epoch.blind_for >= self._config['main']['mon_max_blind_epochs']:
-            logging.critical("%d epochs without visible access points -> rebooting ...", self._epoch.blind_for)
-            self._reboot()
+            logging.critical("%d epochs without visible access points -> restarting ...", self._epoch.blind_for)
+            self._restart()
             self._epoch.blind_for = 0

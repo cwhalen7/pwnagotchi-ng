@@ -7,7 +7,6 @@ from pwnagotchi.ui.hw.base import DisplayImpl
 class LcdHat(DisplayImpl):
     def __init__(self, config):
         super(LcdHat, self).__init__(config, 'lcdhat')
-        self._display = None
 
     def layout(self):
         fonts.setup(10, 9, 10, 35, 25, 9)
@@ -34,7 +33,7 @@ class LcdHat(DisplayImpl):
 
     def initialize(self):
         logging.info("initializing lcdhat display")
-        from pwnagotchi.ui.hw.libs.waveshare.lcdhat.epd import EPD
+        from pwnagotchi.ui.hw.libs.waveshare.lcd.lcdhat.epd import EPD
         self._display = EPD()
         self._display.init()
         self._display.clear()

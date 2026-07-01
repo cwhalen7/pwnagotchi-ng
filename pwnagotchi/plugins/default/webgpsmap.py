@@ -1,9 +1,10 @@
+import sys
+
 import pwnagotchi.plugins as plugins
 import logging
 import os
 import json
 import re
-import datetime
 from flask import Response
 from functools import lru_cache
 from dateutil.parser import parse
@@ -13,7 +14,7 @@ from dateutil.parser import parse
 
     the plugin does the following:
         - search for *.pcap files in your /handshakes/ dir
-            - for every found .pcap file it looks for a .geo.json or .gps.json or .paw-gps.json file with
+            - for every found .pcap file it looks for a .geo.json or .gps.json or file with
               latitude+longitude data inside and shows this position on the map
             - if also an .cracked file with a plaintext password inside exist, it reads the content and shows the
               position as green instead of red and the password inside the infopox of the position
@@ -21,6 +22,7 @@ from dateutil.parser import parse
         you can save the html-map as one file for offline use or host on your own webspace with "/plugins/webgpsmap/offlinemap"
 
 '''
+
 
 class Webgpsmap(plugins.Plugin):
     __author__ = 'https://github.com/xenDE and https://github.com/dadav'
@@ -85,7 +87,8 @@ class Webgpsmap(plugins.Plugin):
                     # returns all positions
                     try:
                         self.ALREADY_SENT = list()
-                        response_data = bytes(json.dumps(self.load_gps_from_dir(self.config['bettercap']['handshakes'])), "utf-8")
+                        response_data = bytes(
+                            json.dumps(self.load_gps_from_dir(self.config['bettercap']['handshakes'])), "utf-8")
                         response_status = 200
                         response_mimetype = "application/json"
                         response_header_contenttype = 'application/json'
@@ -98,12 +101,13 @@ class Webgpsmap(plugins.Plugin):
                         self.ALREADY_SENT = list()
                         json_data = json.dumps(self.load_gps_from_dir(self.config['bettercap']['handshakes']))
                         html_data = self.get_html()
-                        html_data = html_data.replace('var positions = [];', 'var positions = ' + json_data + ';positionsLoaded=true;drawPositions();')
+                        html_data = html_data.replace('var positions = [];',
+                                                      'var positions = ' + json_data + ';positionsLoaded=true;drawPositions();')
                         response_data = bytes(html_data, "utf-8")
                         response_status = 200
                         response_mimetype = "application/xhtml+xml"
                         response_header_contenttype = 'text/html'
-                        response_header_contentdisposition = 'attachment; filename=webgpsmap.html';
+                        response_header_contentdisposition = 'attachment; filename=webgpsmap.html'
                     except Exception as error:
                         logging.error(f"[webgpsmap] on_webhook offlinemap: error: {error}")
                         return
@@ -149,7 +153,6 @@ class Webgpsmap(plugins.Plugin):
     def _get_pos_from_file(self, path):
         return PositionFile(path)
 
-
     def load_gps_from_dir(self, gpsdir, newest_only=False):
         """
         Parses the gps-data from disk
@@ -160,13 +163,10 @@ class Webgpsmap(plugins.Plugin):
 
         logging.info(f"[webgpsmap] scanning {handshake_dir}")
 
-
         all_files = os.listdir(handshake_dir)
-        #print(all_files)
-        all_pcap_files = [os.path.join(handshake_dir, filename)
-                                for filename in all_files
-                                if filename.endswith('.pcap')
-                                ]
+        # print(all_files)
+        all_pcap_files = [os.path.join(handshake_dir, filename) for filename in all_files if
+                          filename.endswith('.pcap')]
         all_geo_or_gps_files = []
         for filename_pcap in all_pcap_files:
             filename_base = filename_pcap[:-5]  # remove ".pcap"
@@ -183,22 +183,18 @@ class Webgpsmap(plugins.Plugin):
             if check_for in all_files:
                 filename_position = str(os.path.join(handshake_dir, check_for))
 
-            logging.debug("[webgpsmap] search for .paw-gps.json")
-            check_for = os.path.basename(filename_base) + ".paw-gps.json"
-            if check_for in all_files:
-                filename_position = str(os.path.join(handshake_dir, check_for))
-
             logging.debug(f"[webgpsmap] end search for position data files and use {filename_position}")
 
             if filename_position is not None:
                 all_geo_or_gps_files.append(filename_position)
 
-    #    all_geo_or_gps_files = set(all_geo_or_gps_files) - set(SKIP)   # remove skipped networks? No!
+        #    all_geo_or_gps_files = set(all_geo_or_gps_files) - set(SKIP)   # remove skipped networks? No!
 
         if newest_only:
             all_geo_or_gps_files = set(all_geo_or_gps_files) - set(self.ALREADY_SENT)
 
-        logging.info(f"[webgpsmap] Found {len(all_geo_or_gps_files)} position-data files from {len(all_pcap_files)} handshakes. Fetching positions ...")
+        logging.info(
+            f"[webgpsmap] Found {len(all_geo_or_gps_files)} position-data files from {len(all_pcap_files)} handshakes. Fetching positions ...")
 
         for pos_file in all_geo_or_gps_files:
             try:
@@ -216,9 +212,7 @@ class Webgpsmap(plugins.Plugin):
                     pos_type = 'gps'
                 elif pos.type() == PositionFile.GEO:
                     pos_type = 'geo'
-                elif pos.type() == PositionFile.PAWGPS:
-                    pos_type = 'paw'
-                gps_data[ssid+"_"+mac] = {
+                gps_data[ssid + "_" + mac] = {
                     'ssid': ssid,
                     'mac': mac,
                     'type': pos_type,
@@ -227,7 +221,7 @@ class Webgpsmap(plugins.Plugin):
                     'acc': pos.accuracy(),
                     'ts_first': pos.timestamp_first(),
                     'ts_last': pos.timestamp_last(),
-                    }
+                }
 
                 # get ap password if exist
                 check_for = os.path.basename(pos_file).split(".")[0] + ".pcap.cracked"
@@ -268,7 +262,6 @@ class PositionFile:
     """
     GPS = 1
     GEO = 2
-    PAWGPS = 3
 
     def __init__(self, path):
         self._file = path
@@ -285,7 +278,7 @@ class PositionFile:
         """
         Returns the mac from filename
         """
-        parsed_mac = re.search(r'.*_?([a-zA-Z0-9]{12})\.(?:gps|geo|paw-gps)\.json', self._filename)
+        parsed_mac = re.search(r'.*_?([a-zA-Z0-9]{12})\.(?:gps|geo)\.json', self._filename)
         if parsed_mac:
             mac = parsed_mac.groups()[0]
             return mac
@@ -295,11 +288,10 @@ class PositionFile:
         """
         Returns the ssid from filename
         """
-        parsed_ssid = re.search(r'(.+)_[a-zA-Z0-9]{12}\.(?:gps|geo|paw-gps)\.json', self._filename)
+        parsed_ssid = re.search(r'(.+)_[a-zA-Z0-9]{12}\.(?:gps|geo)\.json', self._filename)
         if parsed_ssid:
             return parsed_ssid.groups()[0]
         return None
-
 
     def json(self):
         """
@@ -358,8 +350,6 @@ class PositionFile:
             return PositionFile.GPS
         if self._file.endswith('.geo.json'):
             return PositionFile.GEO
-        if self._file.endswith('.paw-gps.json'):
-            return PositionFile.PAWGPS
         return None
 
     def lat(self):
@@ -406,9 +396,7 @@ class PositionFile:
 
     def accuracy(self):
         if self.type() == PositionFile.GPS:
-            return 50.0 # a default
-        if self.type() == PositionFile.PAWGPS:
-            return 50.0 # a default
+            return 50.0  # a default
         if self.type() == PositionFile.GEO:
             try:
                 return self._json['accuracy']
