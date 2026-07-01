@@ -1,4 +1,4 @@
-import _thread
+import threading
 import logging
 import random
 import time
@@ -20,12 +20,29 @@ WHITE = 0xff
 BLACK = 0x00
 ROOT = None
 
+# (background, foreground) values per Pillow image mode
+_COLOR_MODES = {
+    '1':      (0, 1),
+    'L':      (0, 255),
+    'P':      (0, 255),
+    'RGB':    ((0, 0, 0), (255, 255, 255)),
+    'RGBA':   ((0, 0, 0, 0), (255, 255, 255, 255)),
+    'BGR;16': ((0, 0, 0), (31, 63, 31)),
+    'CMYK':   ((0, 0, 0, 0), (0, 0, 0, 100)),
+}
+
 
 class View(object):
     def __init__(self, config, impl, state=None):
         global ROOT
 
-        # setup faces from the configuration in case the user customized them
+        self.mode = getattr(impl, 'mode', '1')
+        bg, fg = _COLOR_MODES.get(self.mode, _COLOR_MODES['1'])
+        if config['ui'].get('invert', False):
+            bg, fg = fg, bg
+        self.BACKGROUND = bg
+        self.FOREGROUND = fg
+
         faces.load_from_config(config['ui']['faces'])
 
         self._agent = None
@@ -40,41 +57,36 @@ class View(object):
         self._width = self._layout['width']
         self._height = self._layout['height']
         self._state = State(state={
-            'channel': LabeledValue(color=BLACK, label='CH', value='00', position=self._layout['channel'],
-                                    label_font=fonts.Bold,
-                                    text_font=fonts.Medium),
-            'aps': LabeledValue(color=BLACK, label='APS', value='0 (00)', position=self._layout['aps'],
-                                label_font=fonts.Bold,
-                                text_font=fonts.Medium),
-
-            'uptime': LabeledValue(color=BLACK, label='UP', value='00:00:00', position=self._layout['uptime'],
-                                   label_font=fonts.Bold,
-                                   text_font=fonts.Medium),
-
-            'line1': Line(self._layout['line1'], color=BLACK),
-            'line2': Line(self._layout['line2'], color=BLACK),
-
-            'face': Text(value=faces.SLEEP, position=self._layout['face'], color=BLACK, font=fonts.Huge),
-
-            'friend_face': Text(value=None, position=self._layout['friend_face'], font=fonts.Bold, color=BLACK),
-            'friend_name': Text(value=None, position=self._layout['friend_name'], font=fonts.BoldSmall,
-                                color=BLACK),
-
-            'name': Text(value='%s>' % 'pwnagotchi', position=self._layout['name'], color=BLACK, font=fonts.Bold),
-
+            'channel': LabeledValue(color=self.FOREGROUND, label='CH', value='00',
+                                    position=self._layout['channel'],
+                                    label_font=fonts.Bold, text_font=fonts.Medium),
+            'aps': LabeledValue(color=self.FOREGROUND, label='APS', value='0 (00)',
+                                position=self._layout['aps'],
+                                label_font=fonts.Bold, text_font=fonts.Medium),
+            'uptime': LabeledValue(color=self.FOREGROUND, label='UP', value='00:00:00',
+                                   position=self._layout['uptime'],
+                                   label_font=fonts.Bold, text_font=fonts.Medium),
+            'line1': Line(self._layout['line1'], color=self.FOREGROUND),
+            'line2': Line(self._layout['line2'], color=self.FOREGROUND),
+            'face': Text(value=faces.SLEEP, position=self._layout['face'],
+                         color=self.FOREGROUND, font=fonts.Huge),
+            'friend_face': Text(value=None, position=self._layout['friend_face'],
+                                font=fonts.Bold, color=self.FOREGROUND),
+            'friend_name': Text(value=None, position=self._layout['friend_name'],
+                                font=fonts.BoldSmall, color=self.FOREGROUND),
+            'name': Text(value='%s>' % 'pwnagotchi', position=self._layout['name'],
+                         color=self.FOREGROUND, font=fonts.Bold),
             'status': Text(value=self._voice.default(),
                            position=self._layout['status']['pos'],
-                           color=BLACK,
+                           color=self.FOREGROUND,
                            font=self._layout['status']['font'],
                            wrap=True,
-                           # the current maximum number of characters per line, assuming each character is 6 pixels wide
                            max_length=self._layout['status']['max']),
-
-            'shakes': LabeledValue(label='PWND ', value='0 (00)', color=BLACK,
-                                   position=self._layout['shakes'], label_font=fonts.Bold,
-                                   text_font=fonts.Medium),
+            'shakes': LabeledValue(label='PWND ', value='0 (00)', color=self.FOREGROUND,
+                                   position=self._layout['shakes'],
+                                   label_font=fonts.Bold, text_font=fonts.Medium),
             'mode': Text(value='AUTO', position=self._layout['mode'],
-                         font=fonts.Bold, color=BLACK),
+                         font=fonts.Bold, color=self.FOREGROUND),
         })
 
         if state:
@@ -84,7 +96,8 @@ class View(object):
         plugins.on('ui_setup', self)
 
         if config['ui']['fps'] > 0.0:
-            _thread.start_new_thread(self._refresh_handler, ())
+            threading.Thread(target=self._refresh_handler, args=(),
+                             name='UI Handler', daemon=True).start()
             self._ignore_changes = ()
         else:
             logging.warning("ui.fps is 0, the display will only update for major changes")
@@ -99,6 +112,11 @@ class View(object):
         self._state.has_element(key)
 
     def add_element(self, key, elem):
+        if self._config['ui'].get('invert', False) and hasattr(elem, 'color'):
+            if elem.color == self.FOREGROUND:
+                elem.color = self.BACKGROUND
+            elif elem.color == self.BACKGROUND:
+                elem.color = self.FOREGROUND
         self._state.add_element(key, elem)
 
     def remove_element(self, key):
@@ -121,12 +139,12 @@ class View(object):
         delay = 1.0 / self._config['ui']['fps']
         while True:
             try:
-                name = self._state.get('name')
-                self.set('name', name.rstrip('█').strip() if '█' in name else (name + ' █'))
+                if self._config['ui'].get('cursor', True):
+                    name = self._state.get('name')
+                    self.set('name', name.rstrip('█').strip() if '█' in name else (name + ' █'))
                 self.update()
             except Exception as e:
                 logging.warning("non fatal error while updating view: %s" % e)
-
             time.sleep(delay)
 
     def set(self, key, value):
@@ -154,7 +172,7 @@ class View(object):
         self.set('uptime', last_session.duration)
         self.set('channel', '-')
         self.set('aps', "%d" % last_session.associated)
-        self.set('shakes', '%d (%s)' % (last_session.handshakes, \
+        self.set('shakes', '%d (%s)' % (last_session.handshakes,
                                         utils.total_unique_handshakes(self._config['bettercap']['handshakes'])))
         self.set_closest_peer(last_session.last_peer, last_session.peers)
         self.update()
@@ -187,7 +205,6 @@ class View(object):
             self.set('friend_face', None)
             self.set('friend_name', None)
         else:
-            # ref. https://www.metageek.com/training/resources/understanding-rssi-2.html
             if peer.rssi >= -67:
                 num_bars = 4
             elif peer.rssi >= -70:
@@ -212,14 +229,10 @@ class View(object):
         self.update()
 
     def on_new_peer(self, peer):
-        face = ''
-        # first time they met, neutral mood
         if peer.first_encounter():
             face = random.choice((faces.AWAKE, faces.COOL))
-        # a good friend, positive expression
         elif peer.is_good_friend(self._config):
             face = random.choice((faces.MOTIVATED, faces.FRIEND, faces.HAPPY))
-        # normal friend, neutral-positive
         else:
             face = random.choice((faces.EXCITED, faces.HAPPY, faces.SMART))
 
@@ -248,10 +261,6 @@ class View(object):
         part = secs / 10.0
 
         for step in range(0, 10):
-            # if we weren't in a normal state before going
-            # to sleep, keep that face and status on for
-            # a while, otherwise the sleep animation will
-            # always override any minor state change before it
             if was_normal or step > 5:
                 if sleeping:
                     if secs > 1:
@@ -371,8 +380,8 @@ class View(object):
             state = self._state
             changes = state.changes(ignore=self._ignore_changes)
             if force or len(changes):
-                self._canvas = Image.new('1', (self._width, self._height), WHITE)
-                drawer = ImageDraw.Draw(self._canvas)
+                self._canvas = Image.new(self.mode, (self._width, self._height), self.BACKGROUND)
+                drawer = ImageDraw.Draw(self._canvas, self.mode)
 
                 plugins.on('ui_update', self)
 
